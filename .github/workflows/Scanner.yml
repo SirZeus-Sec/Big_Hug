@@ -1,34 +1,43 @@
-name: Secret Scan with TruffleHog
+name: TruffleHog Secret Scan
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    branches:
+      - main
+      - develop
 
 jobs:
   secret-scan:
-    name: Scan changed files for secrets
+    name: Run TruffleHog on PR Changes
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout the PR branch
+      - name: Checkout PR code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2 # Fetch the last two commits to compare changes
-
-      - name: Install TruffleHog
-        run: pip install trufflehog
+          fetch-depth: 0  # Ensures we can get the full history
 
       - name: Get changed files
         id: changed-files
         run: |
-          CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
-          echo "$CHANGED_FILES"
-          echo "files=$CHANGED_FILES" >> $GITHUB_ENV
+          git fetch origin ${{ github.base_ref }} --depth=1
+          git diff --name-only origin/${{ github.base_ref }} ${{ github.event.pull_request.head.sha }} > changed_files.txt
+          echo "Changed files:"
+          cat changed_files.txt
+
+      - name: Install TruffleHog
+        run: |
+          pip install trufflehog
 
       - name: Run TruffleHog on changed files
-        if: env.files != ''
+        id: trufflehog-scan
         run: |
-          for file in ${{ env.files }}; do
-            echo "Scanning $file..."
-            trufflehog --json --entropy=True "$file" || true
-          done
+          if [ -s changed_files.txt ]; then
+            trufflehog filesystem --fail --only-verified $(cat changed_files.txt) || exit 1
+          else
+            echo "No changed files to scan."
+          fi
+
+      - name: Fail workflow if secrets are found
+        if: failure()
+        run: exit 1
