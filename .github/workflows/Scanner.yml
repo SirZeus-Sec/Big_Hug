@@ -15,18 +15,20 @@ jobs:
       - name: Checkout PR code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1  # Fetch only latest changes
+          fetch-depth: 1  # Only fetch latest changes
 
       - name: Get changed files
         id: changed-files
         run: |
-          git fetch origin ${{ github.base_ref }} --depth=1
           git diff --name-only origin/${{ github.base_ref }} ${{ github.event.pull_request.head.sha }} > changed_files.txt
           echo "Changed files:"
           cat changed_files.txt
 
-      - name: Install TruffleHog
-        run: pip install trufflehog
+      - name: Install TruffleHog v3
+        run: |
+          curl -L https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog-linux-amd64 -o trufflehog
+          chmod +x trufflehog
+          sudo mv trufflehog /usr/local/bin/
 
       - name: Run TruffleHog on changed files
         id: trufflehog-scan
@@ -34,7 +36,7 @@ jobs:
           if [ -s changed_files.txt ]; then
             while read -r file; do
               echo "Scanning $file for secrets..."
-              trufflehog --regex --entropy=True "$file" || exit 1
+              trufflehog filesystem --no-verification --json "$file" || exit 1
             done < changed_files.txt
           else
             echo "No changed files to scan."
