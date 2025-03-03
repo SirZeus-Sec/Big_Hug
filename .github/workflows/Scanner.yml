@@ -15,12 +15,14 @@ jobs:
       - name: Checkout PR code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1  # Only fetch latest changes
+          fetch-depth: 0  # Fetch full history
 
       - name: Get changed files
         id: changed-files
         run: |
-          git diff --name-only origin/${{ github.base_ref }} ${{ github.event.pull_request.head.sha }} > changed_files.txt
+          BASE_BRANCH=${{ github.base_ref }}
+          git fetch origin $BASE_BRANCH --depth=1
+          git diff --name-only origin/$BASE_BRANCH HEAD > changed_files.txt
           echo "Changed files:"
           cat changed_files.txt
 
