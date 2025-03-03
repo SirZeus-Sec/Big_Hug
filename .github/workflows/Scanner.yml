@@ -15,7 +15,7 @@ jobs:
       - name: Checkout PR code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Ensures we can get the full history
+          fetch-depth: 1  # Fetch only latest changes
 
       - name: Get changed files
         id: changed-files
@@ -26,14 +26,16 @@ jobs:
           cat changed_files.txt
 
       - name: Install TruffleHog
-        run: |
-          pip install trufflehog
+        run: pip install trufflehog
 
       - name: Run TruffleHog on changed files
         id: trufflehog-scan
         run: |
           if [ -s changed_files.txt ]; then
-            trufflehog filesystem --fail --only-verified $(cat changed_files.txt) || exit 1
+            while read -r file; do
+              echo "Scanning $file for secrets..."
+              trufflehog --regex --entropy=True "$file" || exit 1
+            done < changed_files.txt
           else
             echo "No changed files to scan."
           fi
