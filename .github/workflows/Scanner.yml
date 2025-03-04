@@ -1,49 +1,87 @@
-name: TruffleHog Secret Scan
+name: TruffleHog Secret Scan on PR
 
 on:
   pull_request:
     branches:
-      - main
-      - develop
+      - main  # Change this if needed
+
+permissions:  # ✅ Fix for PR commenting error
+  pull-requests: write  
+  contents: read
 
 jobs:
-  secret-scan:
-    name: Run TruffleHog on PR Changes
+  trufflehog_scan:
+    name: TruffleHog Secret Scan 🔎 🔒
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout PR code
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch full history
+          fetch-depth: 0  # ✅ Fix for "bad object" error (ensures full commit history is fetched)
 
-      - name: Get changed files
+      - name: Install TruffleHog
+        run: pip install trufflehog==2.1.0  # Use TruffleHog v2 for better regex-based detection
+
+      - name: Get Changed Files in PR
         id: changed-files
         run: |
-          BASE_BRANCH=${{ github.base_ref }}
-          git fetch origin $BASE_BRANCH --depth=1
-          git diff --name-only origin/$BASE_BRANCH HEAD > changed_files.txt
-          echo "Changed files:"
-          cat changed_files.txt
+          BASE_SHA=$(git merge-base origin/main HEAD)
+          HEAD_SHA="${{ github.sha }}"
+          echo "BASE_SHA=$BASE_SHA"
+          echo "HEAD_SHA=$HEAD_SHA"
+          echo "CHANGED_FILES=$(git diff --name-only $BASE_SHA $HEAD_SHA | tr '\n' ' ')" >> $GITHUB_ENV
 
-      - name: Install TruffleHog v3
+      - name: Run TruffleHog on PR Changed Files
+        id: trufflehog_scan
         run: |
-          curl -L https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog-linux-amd64 -o trufflehog
-          chmod +x trufflehog
-          sudo mv trufflehog /usr/local/bin/
+          EXIT_CODE=0
+          SCAN_RESULTS=""
+          for file in $CHANGED_FILES; do
+            if [[ -f "$file" ]]; then
+              echo "Scanning $file..."
+              RESULT=$(trufflehog --regex --entropy=True "$file" 2>&1)
+              echo "$RESULT"
+              SCAN_RESULTS+="$RESULT"$'\n\n'
+              
+              # If secrets are found, set EXIT_CODE to 1
+              if echo "$RESULT" | grep -q 'Reason:'; then
+                  EXIT_CODE=1
+              fi
+            fi
+          done
 
-      - name: Run TruffleHog on changed files
-        id: trufflehog-scan
-        run: |
-          if [ -s changed_files.txt ]; then
-            while read -r file; do
-              echo "Scanning $file for secrets..."
-              trufflehog filesystem --no-verification --json "$file" || exit 1
-            done < changed_files.txt
-          else
-            echo "No changed files to scan."
-          fi
+          # Save results to a file for use in PR comment
+          echo "$SCAN_RESULTS" > scan_results.txt
 
-      - name: Fail workflow if secrets are found
+          exit $EXIT_CODE  # Exit with 1 if secrets are found
+
+      - name: Upload Scan Results as Artifact
+        uses: actions/upload-artifact@v4  # ✅ Fixed version
+        with:
+          name: TruffleHog-Scan-Results
+          path: scan_results.txt
+          retention-days: 5
+
+      - name: Comment on PR with Scan Results
+        if: always()
+        uses: mshick/add-pr-comment@v2
+        with:
+          message: |
+            🔍 **TruffleHog Scan Results** 🔍
+
+            - ✅ Scan **Completed**
+            - 🚀 Repository: ${{ github.repository }}
+            - 📄 Files Scanned: ${{ env.CHANGED_FILES }}
+
+            **Scan Details:** [View Full Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            
+            **Action Required:**
+            - ❌ If secrets were found, please remove them before merging.
+            - ✅ If no secrets were found, you're good to go!
+        env:
+          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Fail if Secrets Were Found
         if: failure()
         run: exit 1
