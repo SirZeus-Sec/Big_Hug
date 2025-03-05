@@ -77,7 +77,7 @@ jobs:
             **Scan Details:** [View Full Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
             
             **Action Required:**
-            - ❌ If secrets were found, please remove them before merging.
+            - ❌ If secrets were found, please rotate them before merging.
             - ✅ If no secrets were found, you're good to go!
         env:
           GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
