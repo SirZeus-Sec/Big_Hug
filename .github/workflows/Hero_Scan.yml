@@ -3,10 +3,11 @@ name: TruffleHog Secret Scan on PR
 on:
   pull_request:
     branches:
-      - '*'  
+      - main
+      - master  # ✅ Added master branch for compatibility
 
-permissions:  
-  pull-requests: write  
+permissions:
+  pull-requests: write
   contents: read
 
 jobs:
@@ -18,30 +19,24 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # ✅ Fetch full commit history
+          fetch-depth: 0  # ✅ Ensures full commit history is fetched
 
       - name: Install TruffleHog
-        run: pip install trufflehog==2.1.0  # ✅ Use TruffleHog v2 for better regex-based detection
+        run: pip install trufflehog==2.1.0  # Use TruffleHog v2 for regex-based detection
 
-      - name: Get Default Branch & Changed Files
+      - name: Get Changed Files in PR
         id: changed-files
         run: |
-          # ✅ Detect the default branch dynamically
-          DEFAULT_BRANCH=$(git remote show origin | awk '/HEAD branch/ {print $NF}')
-          echo "Default branch is: $DEFAULT_BRANCH"
-          
-          BASE_SHA=$(git merge-base origin/$DEFAULT_BRANCH HEAD)
+          # Determine the base branch (main or master)
+          BASE_BRANCH=$(git branch -r | grep -E 'origin/(main|master)' | head -1 | sed 's/origin\///')
+          BASE_SHA=$(git merge-base origin/$BASE_BRANCH HEAD)
           HEAD_SHA="${{ github.sha }}"
-          echo "BASE_SHA=$BASE_SHA" >> $GITHUB_ENV
-          echo "HEAD_SHA=$HEAD_SHA" >> $GITHUB_ENV
-          
-          # ✅ Get changed files only in the PR
-          CHANGED_FILES=$(git diff --name-only $BASE_SHA $HEAD_SHA | tr '\n' ' ')
-          echo "CHANGED_FILES=$CHANGED_FILES" >> $GITHUB_ENV
+          echo "BASE_SHA=$BASE_SHA"
+          echo "HEAD_SHA=$HEAD_SHA"
+          echo "CHANGED_FILES=$(git diff --name-only $BASE_SHA $HEAD_SHA | tr '\n' ' ')" >> $GITHUB_ENV
 
       - name: Run TruffleHog on PR Changed Files
         id: trufflehog_scan
-        continue-on-error: true  # ✅ Allows PRs even if secrets are found
         run: |
           EXIT_CODE=0
           SCAN_RESULTS=""
@@ -52,20 +47,20 @@ jobs:
               echo "$RESULT"
               SCAN_RESULTS+="$RESULT"$'\n\n'
               
-              # ✅ If secrets are found, set EXIT_CODE to 1
+              # If secrets are found, set EXIT_CODE to 1
               if echo "$RESULT" | grep -q 'Reason:'; then
                   EXIT_CODE=1
               fi
             fi
           done
 
-          # ✅ Save results to a file for use in PR comment
+          # Save results to a file for use in PR comment
           echo "$SCAN_RESULTS" > scan_results.txt
-          
-          exit $EXIT_CODE  # ✅ Only fail if a secret is detected
+
+          exit $EXIT_CODE  # Exit with 1 if secrets are found
 
       - name: Upload Scan Results as Artifact
-        uses: actions/upload-artifact@v4  # ✅ Upload scan report
+        uses: actions/upload-artifact@v4
         with:
           name: TruffleHog-Scan-Results
           path: scan_results.txt
@@ -85,11 +80,19 @@ jobs:
             **Scan Details:** [View Full Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
             
             **Action Required:**
-            - ❌ If secrets were found, rotate them before merging.
+            - ❌ If secrets were found, please rotate them before merging.
             - ✅ If no secrets were found, you're good to go!
         env:
           GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
 
-      - name: Allow PR Merge Even if Secrets Exist
-        if: failure()
-        run: echo "⚠️ Warning:Secrets detected, but merge is allowed."
+      - name: Fail if Secrets Were Found
+        if: failure() && steps.trufflehog_scan.outcome == 'failure'
+        run: |
+          echo "🚨 Secrets were found in the scan. Please rotate them before merging."
+          exit 1
+
+      - name: Approve PR if No Secrets Found
+        if: success()
+        run: |
+          echo "✅ No secrets found. PR is approved for merging."
+          # Add logic here to mark the PR as approved (if needed)
