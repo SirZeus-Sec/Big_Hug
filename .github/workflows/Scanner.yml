@@ -92,4 +92,4 @@ jobs:
 
       - name: Allow PR Merge Even if Secrets Exist
         if: failure()
-        run: echo "⚠️ Warning: Secrets detected, but merge is allowed."
+        run: echo "⚠️ Warning:Secrets detected, but merge is allowed."
